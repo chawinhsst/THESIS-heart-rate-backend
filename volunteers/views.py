@@ -1,3 +1,4 @@
+from django.shortcuts import render
 from rest_framework import generics
 from rest_framework.views import APIView
 from rest_framework.response import Response
@@ -6,6 +7,11 @@ from .serializers import VolunteerSerializer, EmailCheckSerializer
 from django.core.mail import send_mail
 from django.conf import settings # Import Django's settings
 
+def index_view(request):
+    """
+    A simple view to render the informational homepage.
+    """
+    return render(request, 'volunteers/index.html')
 class VolunteerCreateView(generics.CreateAPIView):
     queryset = Volunteer.objects.all()
     serializer_class = VolunteerSerializer
