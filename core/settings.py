@@ -21,10 +21,9 @@ INSTALLED_APPS = [
     'django.contrib.contenttypes',
     'django.contrib.sessions',
     'django.contrib.messages',
-    # Add WhiteNoise to INSTALLED_APPS
     'whitenoise.runserver_nostatic',
     'django.contrib.staticfiles',
-    # Our new apps
+    # Our app
     'volunteers.apps.VolunteersConfig',
     # Third-party apps
     'rest_framework',
@@ -35,7 +34,6 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    # WhiteNoise Middleware should be placed right after the security middleware
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
@@ -93,9 +91,7 @@ USE_TZ = True
 
 # --- Static files (CSS, JavaScript, Images) ---
 STATIC_URL = 'static/'
-# This setting tells Django where to collect all static files for production.
 STATIC_ROOT = BASE_DIR / 'staticfiles'
-# This new setting enables WhiteNoise's compression and caching features.
 STORAGES = {
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
@@ -104,12 +100,23 @@ STORAGES = {
 
 
 # --- CORS (Cross-Origin Resource Sharing) Settings ---
-# This is now more flexible and reads from your environment variables.
 CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://127.0.0.1:5173,http://localhost:5173').split(',')
-
-# ADD THIS NEW LINE
-# This tells the backend it's okay to accept cookies from those domains
 CORS_ALLOW_CREDENTIALS = True
+
+
+# --- DJANGO REST FRAMEWORK SETTINGS ---
+REST_FRAMEWORK = {
+    # THIS IS THE CRUCIAL ADDITION
+    # It tells DRF to check for an "Authorization: Token <token>" header on incoming requests.
+    'DEFAULT_AUTHENTICATION_CLASSES': [
+        'rest_framework.authentication.TokenAuthentication',
+    ],
+    # This setting, which you would have added before, locks down endpoints by default.
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAdminUser',
+    ]
+}
+
 
 # --- Email Settings for Development ---
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
