@@ -29,6 +29,7 @@ INSTALLED_APPS = [
     # Third-party apps
     'rest_framework',
     'corsheaders',
+    'django_filters',
 ]
 
 MIDDLEWARE = [
@@ -105,6 +106,9 @@ STORAGES = {
 # This is now more flexible and reads from your environment variables.
 CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://127.0.0.1:5173,http://localhost:5173').split(',')
 
+# ADD THIS NEW LINE
+# This tells the backend it's okay to accept cookies from those domains
+CORS_ALLOW_CREDENTIALS = True
 
 # --- Email Settings for Development ---
 EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'

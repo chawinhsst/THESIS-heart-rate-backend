@@ -1,27 +1,53 @@
+from django.http import JsonResponse
+from django.views.decorators.csrf import ensure_csrf_cookie
 from django.shortcuts import render
-from rest_framework import generics
-from rest_framework.views import APIView
-from rest_framework.response import Response
-from .models import Volunteer
-from .serializers import VolunteerSerializer, EmailCheckSerializer
 from django.core.mail import send_mail
-from django.conf import settings # Import Django's settings
+from django.conf import settings
+from rest_framework import viewsets, permissions
+from rest_framework.decorators import action
+from rest_framework.response import Response
+from django_filters.rest_framework import DjangoFilterBackend
+from .models import Volunteer
+from .serializers import VolunteerSerializer
 
+
+@ensure_csrf_cookie
+def get_csrf_token(request):
+    """
+    This view sets the CSRF cookie on the client.
+    """
+    return JsonResponse({"detail": "CSRF cookie set"})
+
+# This view for the informational homepage remains the same.
 def index_view(request):
     """
     A simple view to render the informational homepage.
     """
     return render(request, 'volunteers/index.html')
-class VolunteerCreateView(generics.CreateAPIView):
-    queryset = Volunteer.objects.all()
-    serializer_class = VolunteerSerializer
 
-    # This method is called by Django right after a volunteer is saved.
+
+# This new ViewSet replaces the old VolunteerCreateView and EmailCheckView
+class VolunteerViewSet(viewsets.ModelViewSet):
+    """
+    This ViewSet automatically provides `list` (GET), `create` (POST), `retrieve` (GET /id),
+    `update` (PUT/PATCH /id), and `destroy` (DELETE /id) actions for the Volunteer model.
+    """
+    queryset = Volunteer.objects.all().order_by('-registration_date')
+    serializer_class = VolunteerSerializer
+    permission_classes = [permissions.IsAdminUser] # Ensures only admin users can access
+    
+    # This enables filtering by the 'status' field in the URL
+    # e.g., /api/volunteers/?status=pending
+    filter_backends = [DjangoFilterBackend]
+    filterset_fields = ['status']
+
     def perform_create(self, serializer):
-        # First, save the volunteer object to the database as normal.
+        """
+        This method is called when a new volunteer is created via a POST request.
+        We keep our email notification logic here.
+        """
         volunteer = serializer.save()
 
-        # --- Email Sending Logic ---
         try:
             # --- Email 1: Notification to Admin ---
             admin_subject = f"New Volunteer Registration: {volunteer.first_name} {volunteer.last_name}"
@@ -32,13 +58,13 @@ class VolunteerCreateView(generics.CreateAPIView):
             Email: {volunteer.email}
             Registration Date: {volunteer.registration_date.strftime('%Y-%m-%d %H:%M')}
 
-            Please log in to the admin panel to view their full details.
+            Please log in to the admin panel to review and approve them.
             """
             send_mail(
                 subject=admin_subject,
                 message=admin_message,
-                from_email='no-reply@heart-rate-study.com', # A placeholder "from" address
-                recipient_list=[settings.ADMIN_EMAIL], # Sends to the admin email from your settings
+                from_email='no-reply@heart-rate-study.com',
+                recipient_list=[settings.ADMIN_EMAIL],
                 fail_silently=False,
             )
 
@@ -49,7 +75,7 @@ class VolunteerCreateView(generics.CreateAPIView):
 
             Thank you for registering to participate in the Heart Rate Anomaly Detection research project. Your interest and contribution are greatly appreciated.
 
-            The principal researcher will contact you shortly with the official consent form and instructions on how to submit your data.
+            Your application is now pending review. The principal researcher will contact you shortly.
 
             Sincerely,
             Chawin Hansasuta
@@ -58,21 +84,24 @@ class VolunteerCreateView(generics.CreateAPIView):
                 subject=volunteer_subject,
                 message=volunteer_message,
                 from_email='no-reply@heart-rate-study.com',
-                recipient_list=[volunteer.email], # Sends to the email the volunteer provided
+                recipient_list=[volunteer.email],
                 fail_silently=False,
             )
 
         except Exception as e:
-            # If emails fail for any reason, it will print an error in your backend terminal
-            # but will not crash the user's registration process.
             print(f"An error occurred while sending emails: {e}")
 
-
-class EmailCheckView(APIView):
-    def post(self, request, *args, **kwargs):
-        serializer = EmailCheckSerializer(data=request.data)
-        if serializer.is_valid():
-            email = serializer.validated_data['email']
-            is_taken = Volunteer.objects.filter(email__iexact=email).exists()
-            return Response({'is_taken': is_taken})
-        return Response(serializer.errors, status=400)
+    @action(detail=True, methods=['post'])
+    def approve(self, request, pk=None):
+        """
+        Custom action to approve a volunteer. Accessible at /api/volunteers/{id}/approve/
+        """
+        volunteer = self.get_object()
+        if volunteer.status == Volunteer.STATUS_PENDING:
+            volunteer.status = Volunteer.STATUS_APPROVED
+            volunteer.save()
+            # Optionally, you could send another email here notifying them of approval
+            return Response({'status': 'volunteer approved'})
+        return Response({'status': 'volunteer was not in pending state'}, status=400)
+    
+    
