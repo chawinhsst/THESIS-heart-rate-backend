@@ -1,0 +1,53 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Registration Confirmation</title>
+</head>
+<body style="margin: 0; padding: 0; font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif, 'Apple Color Emoji', 'Segoe UI Emoji', 'Segoe UI Symbol'; background-color: #f2f4f6;">
+    <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f2f4f6;">
+        <tr>
+            <td align="center" style="padding: 20px;">
+                <table width="100%" border="0" cellspacing="0" cellpadding="0" style="max-width: 600px; background-color: #ffffff; border-radius: 12px; box-shadow: 0 10px 30px -5px rgba(0, 0, 0, 0.1);">
+                    <!-- Header -->
+                    <tr>
+                        <td align="center" style="padding: 30px 20px; border-bottom: 1px solid #e8e8e8;">
+                            <h1 style="margin: 0; color: #0284c7; font-size: 28px; font-weight: 700;">Thank You for Registering!</h1>
+                            <p style="margin: 5px 0 0; color: #64748b; font-size: 16px;">Heart Rate Anomaly Research Project</p>
+                        </td>
+                    </tr>
+                    <!-- Main Content Body -->
+                    <tr>
+                        <td style="padding: 35px 40px; font-size: 16px; line-height: 1.7; color: #374151;">
+                            <h2 style="margin: 0 0 20px; font-size: 22px; font-weight: 600; color: #111827;">Dear {{ first_name }},</h2>
+                            <p style="margin: 0 0 25px;">Your registration has been received and is now pending review. The principal researcher will contact you shortly with the official consent form and further instructions.</p>
+                            <p style="margin: 0 0 25px;">For your records, here is a summary of the information you submitted:</p>
+                            
+                            <!-- Volunteer Details Section -->
+                            <table width="100%" border="0" cellspacing="0" cellpadding="0" style="background-color: #f9fafb; border: 1px solid #e5e7eb; border-radius: 8px; padding: 20px;">
+                                <tr><td style="padding: 8px 0;"><strong style="color: #111827;">Name:</strong> {{ first_name }} {{ last_name }}</td></tr>
+                                <tr><td style="padding: 8px 0;"><strong style="color: #111827;">Email:</strong> {{ email }}</td></tr>
+                                <tr><td style="padding: 8px 0;"><strong style="color: #111827;">Date of Birth:</strong> {{ date_of_birth }}</td></tr>
+                                <tr><td style="padding: 8px 0;"><strong style="color: #111827;">Gender:</strong> {{ gender }}</td></tr>
+                                <tr><td style="padding: 8px 0;"><strong style="color: #111827;">Nationality:</strong> {{ nationality }}</td></tr>
+                                <tr><td style="padding: 8px 0;"><strong style="color: #111827;">Running Platform:</strong> {{ platform }}</td></tr>
+                                <tr><td style="padding: 8px 0;"><strong style="color: #111827;">Smartwatch:</strong> {{ smartwatch }}</td></tr>
+                                <tr><td style="padding: 8px 0;"><strong style="color: #111827;">Run Frequency:</strong> {{ run_frequency }}</td></tr>
+                            </table>
+
+                        </td>
+                    </tr>
+                    <!-- Footer -->
+                    <tr>
+                        <td align="center" style="padding: 30px 20px; border-top: 1px solid #e8e8e8;">
+                            <p style="margin: 0 0 10px; font-size: 14px; color: #6b7280;">If you have any questions, please feel free to contact the researcher at <a href="mailto:chawin@hansasuta.com" style="color: #0ea5e9; text-decoration: none;">chawin@hansasuta.com</a>.</p>
+                            <p style="margin: 0; font-size: 14px; color: #6b7280;">You can also visit the project website at <a href="https://thesis-heart-rate-volunteer-frontend.netlify.app/" target="_blank" style="color: #0ea5e9; text-decoration: none;">this link</a>.</p>
+                        </td>
+                    </tr>
+                </table>
+            </td>
+        </tr>
+    </table>
+</body>
+</html>
