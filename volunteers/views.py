@@ -16,16 +16,15 @@ from .models import Volunteer
 from .serializers import VolunteerSerializer, EmailCheckSerializer
 
 
-# This view for the informational homepage remains and is unchanged.
-def index_view(request):
+# This is the view for your new informational homepage.
+def backend_homepage_view(request):
     """
-    A simple view to render the informational homepage.
+    A simple view to render the informational homepage for the backend root.
     """
     return render(request, 'volunteers/index.html')
 
 
-# This is the new, secure login view that returns a token.
-# It is exempt from CSRF because token authentication provides its own security.
+# This is the secure login view that returns a token.
 @method_decorator(csrf_exempt, name='dispatch')
 class CustomLoginView(ObtainAuthToken):
     def post(self, request, *args, **kwargs):
@@ -55,7 +54,7 @@ class EmailCheckView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-# The ViewSet for managing volunteers, now with specific permissions per action.
+# The ViewSet for managing volunteers.
 class VolunteerViewSet(viewsets.ModelViewSet):
     queryset = Volunteer.objects.all().order_by('-registration_date')
     serializer_class = VolunteerSerializer
@@ -63,11 +62,6 @@ class VolunteerViewSet(viewsets.ModelViewSet):
     filterset_fields = ['status']
 
     def get_permissions(self):
-        """
-        Sets permissions based on the action.
-        - 'create' (public volunteer registration) is allowed for anyone.
-        - All other actions (list, update, delete, approve) require an authenticated admin user.
-        """
         if self.action == 'create':
             self.permission_classes = [permissions.AllowAny]
         else:
@@ -75,10 +69,6 @@ class VolunteerViewSet(viewsets.ModelViewSet):
         return super(VolunteerViewSet, self).get_permissions()
 
     def perform_create(self, serializer):
-        """
-        This method is called when a new volunteer registers.
-        It saves the volunteer and sends notification emails.
-        """
         volunteer = serializer.save()
         try:
             # --- Email 1: Notification to Admin ---
@@ -87,7 +77,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
             send_mail(
                 subject=admin_subject,
                 message=admin_message,
-                from_email=settings.DEFAULT_FROM_EMAIL, # <-- UPDATED
+                from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[settings.ADMIN_EMAIL],
                 fail_silently=False,
             )
@@ -98,7 +88,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
             send_mail(
                 subject=volunteer_subject,
                 message=volunteer_message,
-                from_email=settings.DEFAULT_FROM_EMAIL, # <-- UPDATED
+                from_email=settings.DEFAULT_FROM_EMAIL,
                 recipient_list=[volunteer.email],
                 fail_silently=False,
             )
@@ -107,9 +97,6 @@ class VolunteerViewSet(viewsets.ModelViewSet):
 
     @action(detail=True, methods=['post'], permission_classes=[permissions.IsAdminUser])
     def approve(self, request, pk=None):
-        """
-        Custom action to approve a volunteer. Accessible at /api/volunteers/{id}/approve/
-        """
         volunteer = self.get_object()
         if volunteer.status == Volunteer.STATUS_PENDING:
             volunteer.status = Volunteer.STATUS_APPROVED
