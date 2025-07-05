@@ -24,7 +24,7 @@ def index_view(request):
     return render(request, 'volunteers/index.html')
 
 
-# This is the new, secure login view that returns an authentication token.
+# This is the new, secure login view that returns a token.
 # It is exempt from CSRF because token authentication provides its own security.
 @method_decorator(csrf_exempt, name='dispatch')
 class CustomLoginView(ObtainAuthToken):
@@ -87,7 +87,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
             send_mail(
                 subject=admin_subject,
                 message=admin_message,
-                from_email='no-reply@heart-rate-study.com',
+                from_email=settings.DEFAULT_FROM_EMAIL, # <-- UPDATED
                 recipient_list=[settings.ADMIN_EMAIL],
                 fail_silently=False,
             )
@@ -98,7 +98,7 @@ class VolunteerViewSet(viewsets.ModelViewSet):
             send_mail(
                 subject=volunteer_subject,
                 message=volunteer_message,
-                from_email='no-reply@heart-rate-study.com',
+                from_email=settings.DEFAULT_FROM_EMAIL, # <-- UPDATED
                 recipient_list=[volunteer.email],
                 fail_silently=False,
             )

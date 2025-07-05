@@ -9,6 +9,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = config('SECRET_KEY')
 DEBUG = config('DEBUG', default=False, cast=bool)
 ADMIN_EMAIL = config('ADMIN_EMAIL', default='')
+DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='webmaster@localhost')
+SENDGRID_API_KEY = config('SENDGRID_API_KEY', default=None) # Read SendGrid key for production
 
 # --- Production / Deployment Settings ---
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='127.0.0.1,localhost').split(',')
@@ -106,17 +108,21 @@ CORS_ALLOW_CREDENTIALS = True
 
 # --- DJANGO REST FRAMEWORK SETTINGS ---
 REST_FRAMEWORK = {
-    # THIS IS THE CRUCIAL ADDITION
-    # It tells DRF to check for an "Authorization: Token <token>" header on incoming requests.
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework.authentication.TokenAuthentication',
     ],
-    # This setting, which you would have added before, locks down endpoints by default.
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAdminUser',
     ]
 }
 
 
-# --- Email Settings for Development ---
-EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+# --- EMAIL SETTINGS (Production vs. Development) ---
+if DEBUG:
+    # Development: Print emails to the console
+    EMAIL_BACKEND = 'django.core.mail.backends.console.EmailBackend'
+else:
+    # Production: Use SendGrid
+    EMAIL_BACKEND = "sendgrid_backend.SendgridBackend"
+    SENDGRID_API_KEY = SENDGRID_API_KEY
+    SENDGRID_SANDBOX_MODE_IN_DEBUG = False
