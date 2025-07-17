@@ -1,22 +1,25 @@
+import io
+import pandas as pd
+import numpy as np
 from django.shortcuts import render
-from django.core.mail import send_mail, EmailMultiAlternatives # 1. Import EmailMultiAlternatives
+from django.core.mail import send_mail, EmailMultiAlternatives
 from django.conf import settings
-from django.template.loader import render_to_string # 2. Import render_to_string
-from django.utils.html import strip_tags # 3. Import strip_tags
-
+from django.template.loader import render_to_string
+from django.utils.html import strip_tags
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 
-from rest_framework import viewsets, permissions, status
+from rest_framework import viewsets, permissions, status, generics
 from rest_framework.decorators import action
 from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
+from rest_framework.parsers import MultiPartParser, FormParser
 
 from django_filters.rest_framework import DjangoFilterBackend
-from .models import Volunteer
-from .serializers import VolunteerSerializer, EmailCheckSerializer
+from .models import Volunteer, RunningSession
+from .serializers import VolunteerSerializer, EmailCheckSerializer, RunningSessionSerializer
 
 
 # This view for the informational homepage remains and is unchanged.
@@ -46,7 +49,7 @@ class CustomLoginView(ObtainAuthToken):
 
 # This view for checking if an email exists remains the same.
 class EmailCheckView(APIView):
-    permission_classes = [permissions.AllowAny] # Allow anyone to check an email
+    permission_classes = [permissions.AllowAny]
 
     def post(self, request, *args, **kwargs):
         serializer = EmailCheckSerializer(data=request.data)
@@ -57,7 +60,54 @@ class EmailCheckView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-# The ViewSet for managing volunteers.
+# A dedicated view for updating only the admin label.
+class SessionLabelUpdateView(generics.UpdateAPIView):
+    queryset = RunningSession.objects.all()
+    serializer_class = RunningSessionSerializer
+    permission_classes = [permissions.IsAdminUser]
+
+    def partial_update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance, data={'admin_label': request.data.get('admin_label')}, partial=True)
+        serializer.is_valid(raise_exception=True)
+        self.perform_update(serializer)
+        return Response(serializer.data)
+
+
+# This ViewSet handles file uploads, listing, and deleting sessions.
+class RunningSessionViewSet(viewsets.ModelViewSet):
+    serializer_class = RunningSessionSerializer
+    permission_classes = [permissions.IsAdminUser]
+    parser_classes = [MultiPartParser, FormParser] # Expects file data
+
+    def get_queryset(self):
+        queryset = RunningSession.objects.all().order_by('-session_date')
+        volunteer_id = self.request.query_params.get('volunteer')
+        if volunteer_id is not None:
+            queryset = queryset.filter(volunteer_id=volunteer_id)
+        return queryset
+
+    def perform_create(self, serializer):
+        volunteer = Volunteer.objects.get(id=self.request.data.get('volunteer'))
+        session_file = self.request.data.get('session_file')
+        
+        timeseries_data_list = None
+        if session_file:
+            try:
+                df = pd.read_csv(io.StringIO(session_file.read().decode('utf-8')))
+                df = df.replace({np.nan: None})
+                timeseries_data_list = df.to_dict(orient='records')
+            except Exception as e:
+                print(f"Error parsing CSV file: {e}")
+        
+        serializer.save(
+            volunteer=volunteer,
+            source_type='admin_upload',
+            timeseries_data=timeseries_data_list
+        )
+
+
+# Your existing VolunteerViewSet for managing volunteer details and status.
 class VolunteerViewSet(viewsets.ModelViewSet):
     queryset = Volunteer.objects.all().order_by('-registration_date')
     serializer_class = VolunteerSerializer
@@ -72,14 +122,8 @@ class VolunteerViewSet(viewsets.ModelViewSet):
         return super(VolunteerViewSet, self).get_permissions()
 
     def perform_create(self, serializer):
-        """
-        This method is called when a new volunteer registers.
-        It saves the volunteer and sends both a plain-text admin notification
-        and a beautiful HTML confirmation email to the volunteer.
-        """
         volunteer = serializer.save()
         try:
-            # --- Email 1: Plain-text Notification to Admin ---
             admin_subject = f"New Volunteer Registration: {volunteer.first_name} {volunteer.last_name}"
             admin_message = f"A new volunteer has registered for the Heart Rate Anomaly study.\n\nName: {volunteer.first_name} {volunteer.last_name}\nEmail: {volunteer.email}\n\nPlease log in to the admin panel to review and approve them."
             send_mail(
@@ -90,37 +134,18 @@ class VolunteerViewSet(viewsets.ModelViewSet):
                 fail_silently=False,
             )
 
-            # --- Email 2: Beautiful HTML Confirmation to Volunteer ---
             volunteer_subject = "Registration Confirmation: Heart Rate Anomaly Study"
-            
-            # Data to pass into the new HTML template
-            context = {
-                'first_name': volunteer.first_name,
-                'last_name': volunteer.last_name,
-                'email': volunteer.email,
-                'date_of_birth': volunteer.date_of_birth,
-                'gender': volunteer.gender,
-                'nationality': volunteer.nationality,
-                'platform': volunteer.platform,
-                'smartwatch': volunteer.smartwatch,
-                'run_frequency': volunteer.run_frequency,
-            }
-            # Render the HTML content from the template file
+            context = { 'first_name': volunteer.first_name, 'last_name': volunteer.last_name, 'email': volunteer.email, 'date_of_birth': volunteer.date_of_birth, 'gender': volunteer.gender, 'nationality': volunteer.nationality, 'platform': volunteer.platform, 'smartwatch': volunteer.smartwatch, 'run_frequency': volunteer.run_frequency, }
             html_content = render_to_string('volunteers/volunteer_confirmation_email.html', context)
-            # Create a plain text version automatically for email clients that don't support HTML
             text_content = strip_tags(html_content)
-
-            # Create the email message
             email = EmailMultiAlternatives(
                 subject=volunteer_subject,
-                body=text_content, # The plain text version
+                body=text_content,
                 from_email=settings.DEFAULT_FROM_EMAIL,
-                to=[volunteer.email] # Send to the volunteer's email address
+                to=[volunteer.email]
             )
-            # Attach the HTML version
             email.attach_alternative(html_content, "text/html")
             email.send()
-
         except Exception as e:
             print(f"An error occurred while sending emails: {e}")
 
@@ -130,6 +155,5 @@ class VolunteerViewSet(viewsets.ModelViewSet):
         if volunteer.status == Volunteer.STATUS_PENDING:
             volunteer.status = Volunteer.STATUS_APPROVED
             volunteer.save()
-            # You could add logic here to send another email notifying the user of their approval
             return Response({'status': 'volunteer approved'})
         return Response({'status': 'volunteer was not in pending state'}, status=status.HTTP_400_BAD_REQUEST)

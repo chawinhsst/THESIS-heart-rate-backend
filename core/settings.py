@@ -10,7 +10,7 @@ SECRET_KEY = config('SECRET_KEY')
 DEBUG = config('DEBUG', default=False, cast=bool)
 ADMIN_EMAIL = config('ADMIN_EMAIL', default='')
 DEFAULT_FROM_EMAIL = config('DEFAULT_FROM_EMAIL', default='webmaster@localhost')
-SENDGRID_API_KEY = config('SENDGRID_API_KEY', default=None) # Read SendGrid key for production
+SENDGRID_API_KEY = config('SENDGRID_API_KEY', default=None)
 
 # --- Production / Deployment Settings ---
 ALLOWED_HOSTS = config('ALLOWED_HOSTS', default='127.0.0.1,localhost').split(',')
@@ -38,7 +38,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'whitenoise.middleware.WhiteNoiseMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    'corsheaders.middleware.CorsMiddleware',
+    'corsheaders.middleware.CorsMiddleware', # Needs to be before most other middleware
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -91,10 +91,14 @@ USE_I18N = True
 USE_TZ = True
 
 
-# --- Static files (CSS, JavaScript, Images) ---
+# --- Static and Media Files ---
 STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
+
 STORAGES = {
+    "default": {
+        "BACKEND": "django.core.files.storage.FileSystemStorage",
+    },
     "staticfiles": {
         "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
     },
@@ -104,6 +108,15 @@ STORAGES = {
 # --- CORS (Cross-Origin Resource Sharing) Settings ---
 CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://127.0.0.1:5173,http://localhost:5173').split(',')
 CORS_ALLOW_CREDENTIALS = True
+
+# --- THIS IS THE FIX ---
+# This explicitly allows the headers your frontend is sending.
+# 'Content-Type' is needed for PATCH requests with a JSON body (the 415 error).
+# 'Authorization' is needed for TokenAuthentication.
+CORS_ALLOWED_HEADERS = config(
+    'CORS_ALLOWED_HEADERS',
+    default='Authorization,Content-Type'
+).split(',')
 
 
 # --- DJANGO REST FRAMEWORK SETTINGS ---
