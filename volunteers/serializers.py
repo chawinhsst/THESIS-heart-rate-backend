@@ -12,14 +12,33 @@ class VolunteerSerializer(serializers.ModelSerializer):
 class EmailCheckSerializer(serializers.Serializer):
     email = serializers.EmailField(required=True)
 
-# RunningSessionSerializer remains the same for file uploads
+# --- UPDATED RunningSessionSerializer ---
 class RunningSessionSerializer(serializers.ModelSerializer):
+    # This adds the volunteer's full name to the API response for better readability
+    # REMOVED: volunteer_name = serializers.CharField(source='volunteer.__str__', read_only=True)
+
+    # --- ADD THESE TWO LINES ---
+    # This tells the serializer to look at the related 'volunteer' object
+    # and get its 'first_name' and 'last_name' fields.
+    volunteer_first_name = serializers.CharField(source='volunteer.first_name', read_only=True)
+    volunteer_last_name = serializers.CharField(source='volunteer.last_name', read_only=True)
+    
     class Meta:
         model = RunningSession
         fields = '__all__'
-        read_only_fields = ['uploaded_at', 'timeseries_data']
+        read_only_fields = [
+            'status',
+            'total_distance_km',
+            'total_duration_secs',
+            'avg_heart_rate',
+            'max_heart_rate',
+            'timeseries_data',
+            'uploaded_at',
+            'volunteer_first_name', # Add new fields here too
+            'volunteer_last_name',
+        ]
 
-# --- ADD THIS NEW SERIALIZER ---
+# SessionLabelUpdateSerializer remains the same
 class SessionLabelUpdateSerializer(serializers.ModelSerializer):
     """A simple serializer for updating only the admin_label."""
     class Meta:

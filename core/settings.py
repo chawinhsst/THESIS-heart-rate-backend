@@ -109,10 +109,6 @@ STORAGES = {
 CORS_ALLOWED_ORIGINS = config('CORS_ALLOWED_ORIGINS', default='http://127.0.0.1:5173,http://localhost:5173').split(',')
 CORS_ALLOW_CREDENTIALS = True
 
-# --- THIS IS THE FIX ---
-# This explicitly allows the headers your frontend is sending.
-# 'Content-Type' is needed for PATCH requests with a JSON body (the 415 error).
-# 'Authorization' is needed for TokenAuthentication.
 CORS_ALLOWED_HEADERS = config(
     'CORS_ALLOWED_HEADERS',
     default='Authorization,Content-Type'
@@ -126,7 +122,9 @@ REST_FRAMEWORK = {
     ],
     'DEFAULT_PERMISSION_CLASSES': [
         'rest_framework.permissions.IsAdminUser',
-    ]
+    ],
+    'DEFAULT_PAGINATION_CLASS': 'rest_framework.pagination.PageNumberPagination',
+    'PAGE_SIZE': 10, # The default number of items per page
 }
 
 
@@ -139,3 +137,11 @@ else:
     EMAIL_BACKEND = "sendgrid_backend.SendgridBackend"
     SENDGRID_API_KEY = SENDGRID_API_KEY
     SENDGRID_SANDBOX_MODE_IN_DEBUG = False
+
+
+# --- CELERY SETTINGS (Add this section) ---
+CELERY_BROKER_URL = 'redis://localhost:6379/0'
+CELERY_RESULT_BACKEND = 'redis://localhost:6379/0'
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_TIMEZONE = TIME_ZONE

@@ -16,21 +16,19 @@ from rest_framework.views import APIView
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
 from rest_framework.parsers import MultiPartParser, FormParser
+from rest_framework.filters import OrderingFilter
 
 from django_filters.rest_framework import DjangoFilterBackend
 from .models import Volunteer, RunningSession
-from .serializers import VolunteerSerializer, EmailCheckSerializer, RunningSessionSerializer
+from .serializers import VolunteerSerializer, EmailCheckSerializer, RunningSessionSerializer, SessionLabelUpdateSerializer
+from .tasks import process_session_file
+from .pagination import CustomPageNumberPagination
 
 
-# This view for the informational homepage remains and is unchanged.
 def backend_homepage_view(request):
-    """
-    A simple view to render the informational homepage for the backend root.
-    """
     return render(request, 'volunteers/index.html')
 
 
-# This is the secure login view that returns a token.
 @method_decorator(csrf_exempt, name='dispatch')
 class CustomLoginView(ObtainAuthToken):
     def post(self, request, *args, **kwargs):
@@ -47,7 +45,6 @@ class CustomLoginView(ObtainAuthToken):
         })
 
 
-# This view for checking if an email exists remains the same.
 class EmailCheckView(APIView):
     permission_classes = [permissions.AllowAny]
 
@@ -60,54 +57,59 @@ class EmailCheckView(APIView):
         return Response(serializer.errors, status=status.HTTP_400_BAD_REQUEST)
 
 
-# A dedicated view for updating only the admin label.
 class SessionLabelUpdateView(generics.UpdateAPIView):
     queryset = RunningSession.objects.all()
-    serializer_class = RunningSessionSerializer
+    serializer_class = SessionLabelUpdateSerializer
     permission_classes = [permissions.IsAdminUser]
 
-    def partial_update(self, request, *args, **kwargs):
-        instance = self.get_object()
-        serializer = self.get_serializer(instance, data={'admin_label': request.data.get('admin_label')}, partial=True)
-        serializer.is_valid(raise_exception=True)
-        self.perform_update(serializer)
-        return Response(serializer.data)
 
-
-# This ViewSet handles file uploads, listing, and deleting sessions.
 class RunningSessionViewSet(viewsets.ModelViewSet):
     serializer_class = RunningSessionSerializer
     permission_classes = [permissions.IsAdminUser]
-    parser_classes = [MultiPartParser, FormParser] # Expects file data
+    parser_classes = [MultiPartParser, FormParser]
+    pagination_class = CustomPageNumberPagination
+    filter_backends = [DjangoFilterBackend, OrderingFilter]
+    ordering_fields = [
+        'session_date', 
+        'total_distance_km', 
+        'total_duration_secs', 
+        'avg_heart_rate', 
+        'max_heart_rate', 
+        'min_heart_rate'
+    ]
 
     def get_queryset(self):
-        queryset = RunningSession.objects.all().order_by('-session_date')
+        queryset = RunningSession.objects.all()
         volunteer_id = self.request.query_params.get('volunteer')
         if volunteer_id is not None:
             queryset = queryset.filter(volunteer_id=volunteer_id)
         return queryset
 
-    def perform_create(self, serializer):
-        volunteer = Volunteer.objects.get(id=self.request.data.get('volunteer'))
-        session_file = self.request.data.get('session_file')
-        
-        timeseries_data_list = None
+    def update(self, request, *args, **kwargs):
+        instance = self.get_object()
+        session_file = request.data.get('session_file')
         if session_file:
-            try:
-                df = pd.read_csv(io.StringIO(session_file.read().decode('utf-8')))
-                df = df.replace({np.nan: None})
-                timeseries_data_list = df.to_dict(orient='records')
-            except Exception as e:
-                print(f"Error parsing CSV file: {e}")
-        
-        serializer.save(
-            volunteer=volunteer,
-            source_type='admin_upload',
-            timeseries_data=timeseries_data_list
-        )
+            instance.session_file = session_file
+            instance.status = RunningSession.STATUS_PROCESSING
+            instance.processing_error = None
+            instance.timeseries_data = None
+            instance.total_distance_km = None
+            instance.total_duration_secs = None
+            instance.avg_heart_rate = None
+            instance.max_heart_rate = None
+            instance.min_heart_rate = None
+            instance.save()
+            process_session_file.delay(instance.id)
+            serializer = self.get_serializer(instance)
+            return Response(serializer.data)
+        return super().update(request, *args, **kwargs)
+
+    def perform_create(self, serializer):
+        session_instance = serializer.save()
+        if session_instance.session_file:
+            process_session_file.delay(session_instance.id)
 
 
-# Your existing VolunteerViewSet for managing volunteer details and status.
 class VolunteerViewSet(viewsets.ModelViewSet):
     queryset = Volunteer.objects.all().order_by('-registration_date')
     serializer_class = VolunteerSerializer

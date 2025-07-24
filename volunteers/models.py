@@ -31,21 +31,42 @@ class Volunteer(models.Model):
 
 
 class RunningSession(models.Model):
+    # --- Status field for background task tracking ---
+    STATUS_PROCESSING = 'processing'
+    STATUS_COMPLETED = 'completed'
+    STATUS_FAILED = 'failed'
+    
+    STATUS_CHOICES = [
+        (STATUS_PROCESSING, 'Processing'),
+        (STATUS_COMPLETED, 'Completed'),
+        (STATUS_FAILED, 'Failed'),
+    ]
+    
+    # --- Core Relationship & Uploaded File ---
     volunteer = models.ForeignKey(Volunteer, on_delete=models.CASCADE, related_name='sessions')
     session_date = models.DateTimeField()
     source_type = models.CharField(max_length=50, help_text="e.g., 'admin_upload'")
-    
-    # This field will handle the file upload itself
     session_file = models.FileField(upload_to='session_files/', blank=True, null=True)
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default=STATUS_PROCESSING)
+    
+    # --- ADD THIS FIELD ---
+    processing_error = models.TextField(blank=True, null=True, help_text="Stores the error message if processing fails")
 
-    # This field will store the parsed CSV data as JSON
-    timeseries_data = models.JSONField(blank=True, null=True)
+    # --- Fields for Summarized Data (populated by background task) ---
+    total_distance_km = models.FloatField(null=True, blank=True, help_text="Total distance in kilometers")
+    total_duration_secs = models.FloatField(null=True, blank=True, help_text="Total duration in seconds")
+    avg_heart_rate = models.IntegerField(null=True, blank=True, help_text="Average heart rate in bpm")
+    max_heart_rate = models.IntegerField(null=True, blank=True, help_text="Maximum heart rate in bpm")
+    
+    # --- Field for full time-series data ---
+    timeseries_data = models.JSONField(blank=True, null=True, help_text="Stores the full time-series data from the file")
 
-    # Fields for your ML analysis
+    # --- Fields for ML analysis ---
     ml_prediction = models.CharField(max_length=100, blank=True, null=True)
     ml_confidence = models.FloatField(blank=True, null=True)
     admin_label = models.CharField(max_length=100, blank=True, null=True)
 
+    # --- Metadata ---
     uploaded_at = models.DateTimeField(auto_now_add=True)
 
     def __str__(self):
