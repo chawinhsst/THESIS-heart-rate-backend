@@ -1,6 +1,6 @@
 from celery import shared_task
 from .models import RunningSession
-from .utils import analyze_fit_file
+from .utils import analyze_session_file  # <-- IMPORT THE NEW MAIN FUNCTION
 import logging
 
 # Get an instance of a logger
@@ -23,11 +23,12 @@ def process_session_file(session_id):
         # Get the file path from the model's FileField
         file_path = session.session_file.path
         
-        # Analyze the file using our helper function
-        summary_data, timeseries_data = analyze_fit_file(file_path)
+        # --- THIS IS THE KEY CHANGE ---
+        # Analyze the file using our new helper dispatcher function
+        summary_data, timeseries_data = analyze_session_file(file_path)
 
         if summary_data is None and timeseries_data is None:
-            raise ValueError("Failed to parse .fit file, it might be corrupt.")
+            raise ValueError(f"Failed to parse file '{session.session_file.name}', it might be corrupt or an invalid format.")
 
         # Update the session model instance with the results
         session.total_distance_km = summary_data.get('total_distance_km')
@@ -45,6 +46,5 @@ def process_session_file(session_id):
         logger.error(f"Error processing session ID {session_id}: {e}")
         # If any error occurs during processing, mark the session as 'failed'
         session.status = RunningSession.STATUS_FAILED
-        # --- THIS IS THE ADDED LINE ---
         session.processing_error = str(e) # Save the error message to the database
         session.save()
