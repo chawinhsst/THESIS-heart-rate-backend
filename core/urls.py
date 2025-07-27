@@ -1,19 +1,17 @@
 from django.contrib import admin
 from django.urls import path, include
-from rest_framework.routers import DefaultRouter
-from volunteers import views
 
-router = DefaultRouter()
-router.register(r'volunteers', views.VolunteerViewSet, basename='volunteer')
-router.register(r'sessions', views.RunningSessionViewSet, basename='session')
+# Import the CustomLoginView from your volunteers app
+from volunteers.views import CustomLoginView
 
 urlpatterns = [
     path('admin/', admin.site.urls),
-    path('api-auth/login/', views.CustomLoginView.as_view(), name='api_token_auth'),
     
-    # This is the new, dedicated URL for updating labels with JSON data.
-    path('api/sessions/<int:pk>/update_label/', views.SessionLabelUpdateView.as_view(), name='session-update-label'),
+    # This is the new line that fixes the 404 error.
+    # It creates the /api-auth/login/ endpoint your frontend is looking for.
+    path('api-auth/login/', CustomLoginView.as_view(), name='api_login'),
     
-    # This includes all the other routes for volunteers and sessions.
-    path('api/', include(router.urls)),
+    # This line correctly includes all other URLs (sessions, volunteers, etc.)
+    # from your volunteers app under the /api/ prefix.
+    path('api/', include('volunteers.urls')),
 ]
