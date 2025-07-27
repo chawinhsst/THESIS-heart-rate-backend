@@ -5,7 +5,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 from datetime import timezone
 import os
-import numpy as np  # <-- REQUIRED: Import numpy to handle NaN
+import numpy as np
 
 # ==============================================================================
 # MAIN DISPATCHER FUNCTION
@@ -51,7 +51,6 @@ def analyze_tcx_file(file_path):
     summary_data = {}
     heart_rates = []
 
-    # Extract detailed trackpoint data
     for trackpoint in root.findall('.//tcx:Trackpoint', namespaces):
         point = {}
         time_el = trackpoint.find('tcx:Time', namespaces)
@@ -83,7 +82,6 @@ def analyze_tcx_file(file_path):
         if point.get('timestamp'):
             time_series_data.append(point)
 
-    # Extract summary data from the 'Lap' element
     lap_element = root.find('.//tcx:Lap', namespaces)
     if lap_element is not None:
         total_dist = lap_element.find('tcx:DistanceMeters', namespaces)
@@ -103,91 +101,100 @@ def analyze_tcx_file(file_path):
     return summary_data, time_series_data
 
 # ==============================================================================
-# .CSV FILE PARSER (FINAL CORRECTED VERSION)
+# .CSV FILE PARSER (FINAL ENHANCED VERSION)
 # ==============================================================================
 
 def analyze_csv_file(file_path):
     """
-    Parses a .csv file to extract summary and time-series data.
-    Assumes common column names from devices like Garmin/Strava exports.
+    Parses complex CSV files by cleaning, transforming, and filling data.
     """
     try:
-        df = pd.read_csv(file_path)
+        # Read file, skipping blank lines and handling potential whitespace after commas
+        df = pd.read_csv(file_path, skip_blank_lines=True, skipinitialspace=True)
     except Exception as e:
         raise ValueError(f"Failed to read CSV file: {e}")
 
-    # --- Standardize Column Names ---
+    df.columns = df.columns.str.strip()
+    
+    # --- Step 1: Standardize Column Names ---
     column_map = {
-        'Timestamp': 'timestamp',
-        'Time': 'timestamp',
-        'Heart Rate': 'heart_rate',
-        'HeartRate': 'heart_rate',
-        'hr': 'heart_rate',
-        'Speed': 'speed',
-        'speed (m/s)': 'speed',
-        'Cadence': 'cadence',
-        'Run Cadence': 'cadence',
-        'RunCadence': 'cadence', # Matches your sample file
-        'Altitude': 'altitude',
-        'altitude (m)': 'altitude',
-        'Distance': 'distance',
-        'distance (m)': 'distance',
-        'Latitude': 'position_lat',
-        'Longitude': 'position_long',
-        'Power': 'power',
-        'Watts': 'power', # Matches your sample file
+        'Timestamp': 'timestamp', 'Time': 'timestamp',
+        'Heart Rate': 'heart_rate', 'HeartRate': 'heart_rate', 'hr': 'heart_rate',
+        'Speed': 'speed', 'speed (m/s)': 'speed',
+        'Cadence': 'cadence', 'Run Cadence': 'cadence', 'RunCadence': 'cadence',
+        'Altitude': 'altitude', 'altitude (m)': 'altitude',
+        'Distance': 'distance', 'distance (m)': 'distance',
+        'Latitude': 'position_lat', 'Longitude': 'position_long',
+        'Power': 'power', 'Watts': 'power',
     }
-    df.rename(columns=lambda c: column_map.get(c.strip(), c.strip()), inplace=True)
+    df.rename(columns=lambda c: column_map.get(c, c), inplace=True)
+    
+    # --- Step 2: Coerce Data to Numeric Types ---
+    # This is crucial. It converts all data to numbers, turning errors into NaN.
+    numeric_cols = [
+        'distance', 'enhanced_altitude', 'enhanced_speed', 'gps_accuracy',
+        'position_lat', 'position_long', 'speed', 'heart_rate', 'power'
+    ]
+    for col in numeric_cols:
+        if col in df.columns:
+            df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    if 'heart_rate' not in df.columns:
-        raise ValueError("CSV file must contain a 'Heart Rate' column.")
+    # --- Step 3: Fill Missing Data ---
+    # Now that data is numeric, we can reliably fill missing values.
+    cols_to_ffill = ['distance', 'heart_rate', 'position_lat', 'position_long', 'gps_accuracy']
+    for col in cols_to_ffill:
+        if col in df.columns:
+            df[col] = df[col].ffill()
 
-    # --- Timestamp Handling ---
+    # --- Step 4: Apply FIT-like Unit Conversions ---
+    if 'position_lat' in df.columns:
+        df['position_lat'] = df['position_lat'] * (180.0 / 2**31)
+    if 'position_long' in df.columns:
+        df['position_long'] = df['position_long'] * (180.0 / 2**31)
+
+    if 'enhanced_altitude' in df.columns:
+        df['altitude'] = (df['enhanced_altitude'] / 5.0) - 500.0
+    
+    if 'enhanced_speed' in df.columns:
+        df['speed'] = df['enhanced_speed']
+
+    # --- Step 5: Handle Timestamps ---
     if 'timestamp' in df.columns:
         timestamps = pd.to_datetime(df['timestamp'], errors='coerce')
+        df.dropna(subset=['timestamp'], inplace=True)
+        
         if not timestamps.dropna().empty:
-            if timestamps.dt.tz is None:
-                timestamps = timestamps.dt.tz_localize('UTC')
-            else:
-                timestamps = timestamps.dt.tz_convert('UTC')
+            if timestamps.dt.tz is None: timestamps = timestamps.dt.tz_localize('UTC')
+            else: timestamps = timestamps.dt.tz_convert('UTC')
             
             df['timestamp'] = timestamps.dt.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
-            
-            start_time = timestamps.dropna().iloc[0]
-            end_time = timestamps.dropna().iloc[-1]
+            start_time, end_time = timestamps.dropna().iloc[0], timestamps.dropna().iloc[-1]
             summary_data = {'total_duration_secs': round((end_time - start_time).total_seconds(), 2)}
-        else:
-            summary_data = {}
-    else:
-        summary_data = {}
+        else: summary_data = {}
+    else: raise ValueError("CSV file must contain a 'timestamp' or 'Time' column.")
 
-    # --- Calculate Summary Statistics ---
-    if not df['heart_rate'].dropna().empty:
+    # --- Step 6: Calculate Summary Statistics from Cleaned Data ---
+    if 'heart_rate' in df.columns and not df['heart_rate'].dropna().empty:
         summary_data['avg_heart_rate'] = round(df['heart_rate'].mean())
         summary_data['max_heart_rate'] = int(df['heart_rate'].max())
     
     if 'distance' in df.columns and not df['distance'].dropna().empty:
         summary_data['total_distance_km'] = round(df['distance'].dropna().iloc[-1] / 1000, 2)
 
-    # --- KEY FIX: Replace numpy NaN with None for JSON compatibility ---
-    # This converts all numeric NaN values to a None type, which correctly
-    # becomes 'null' when serialized to JSON for the database.
+    # --- Step 7: Final Cleanup for JSON Output ---
     df = df.replace({np.nan: None})
-    
-    # Convert DataFrame to a list of dictionaries for timeseries data
     time_series_data = df.to_dict('records')
 
     return summary_data, time_series_data
 
 
 # ==============================================================================
-# .FIT FILE PARSER (Your original code, slightly adjusted for consistency)
+# .FIT FILE PARSER
 # ==============================================================================
 
 def analyze_fit_file(file_path):
     """
-    Parses a .fit file and extracts summary and ALL time-series data,
-    applying the correct conversions for scale and offset.
+    Parses a .fit file and extracts summary and ALL time-series data.
     """
     try:
         fitfile = fitparse.FitFile(file_path)
@@ -232,7 +239,6 @@ def analyze_fit_file(file_path):
         if point.get('timestamp'):
             time_series_data.append(point)
 
-    # Process summary data from the 'session' message
     for session_msg in fitfile.get_messages('session'):
         summary_data.update(session_msg.get_values())
     
