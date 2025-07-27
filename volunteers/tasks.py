@@ -1,6 +1,8 @@
+# In volunteers/tasks.py
+
 from celery import shared_task
 from .models import RunningSession
-from .utils import analyze_session_file  # <-- IMPORT THE NEW MAIN FUNCTION
+from .utils import analyze_session_file
 import logging
 
 # Get an instance of a logger
@@ -20,12 +22,12 @@ def process_session_file(session_id):
         return
 
     try:
-        # Get the file path from the model's FileField
-        file_path = session.session_file.path
+        # --- KEY CHANGE: Use .url instead of .path ---
+        # This is required for deployed environments where files are on cloud storage.
+        file_url = session.session_file.url
         
-        # --- THIS IS THE KEY CHANGE ---
-        # Analyze the file using our new helper dispatcher function
-        summary_data, timeseries_data = analyze_session_file(file_path)
+        # Analyze the file using our helper dispatcher function
+        summary_data, timeseries_data = analyze_session_file(file_url)
 
         if summary_data is None and timeseries_data is None:
             raise ValueError(f"Failed to parse file '{session.session_file.name}', it might be corrupt or an invalid format.")
