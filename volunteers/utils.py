@@ -5,6 +5,7 @@ import pandas as pd
 import xml.etree.ElementTree as ET
 from datetime import timezone
 import os
+import numpy as np  # <-- REQUIRED: Import numpy to handle NaN
 
 # ==============================================================================
 # MAIN DISPATCHER FUNCTION
@@ -56,7 +57,6 @@ def analyze_tcx_file(file_path):
         time_el = trackpoint.find('tcx:Time', namespaces)
         hr_el = trackpoint.find('.//tcx:HeartRateBpm/tcx:Value', namespaces)
         
-        # Extract common fields
         point['timestamp'] = time_el.text if time_el is not None else None
         point['heart_rate'] = int(hr_el.text) if hr_el is not None else None
         
@@ -70,13 +70,12 @@ def analyze_tcx_file(file_path):
         point['altitude'] = float(alt_el.text) if alt_el is not None else None
         point['distance'] = float(dist_el.text) if dist_el is not None else None
 
-        # Extract extension data (Speed, Cadence)
         tpx = trackpoint.find('.//ns3:TPX', namespaces)
         if tpx is not None:
             speed_el = tpx.find('ns3:Speed', namespaces)
             cad_el = tpx.find('ns3:RunCadence', namespaces)
             point['speed'] = float(speed_el.text) if speed_el is not None else None
-            point['cadence'] = int(cad_el.text) * 2 if cad_el is not None else None # Cadence is often steps/min, so multiply by 2 for rpm
+            point['cadence'] = int(cad_el.text) * 2 if cad_el is not None else None
 
         if point.get('heart_rate') is not None:
             heart_rates.append(point['heart_rate'])
@@ -95,7 +94,6 @@ def analyze_tcx_file(file_path):
         if total_time is not None:
             summary_data['total_duration_secs'] = round(float(total_time.text), 2)
 
-    # Calculate summary stats from timeseries if not in lap data
     if heart_rates:
         if 'avg_heart_rate' not in summary_data:
             summary_data['avg_heart_rate'] = round(sum(heart_rates) / len(heart_rates))
@@ -105,7 +103,7 @@ def analyze_tcx_file(file_path):
     return summary_data, time_series_data
 
 # ==============================================================================
-# .CSV FILE PARSER
+# .CSV FILE PARSER (FINAL CORRECTED VERSION)
 # ==============================================================================
 
 def analyze_csv_file(file_path):
@@ -129,6 +127,7 @@ def analyze_csv_file(file_path):
         'speed (m/s)': 'speed',
         'Cadence': 'cadence',
         'Run Cadence': 'cadence',
+        'RunCadence': 'cadence', # Matches your sample file
         'Altitude': 'altitude',
         'altitude (m)': 'altitude',
         'Distance': 'distance',
@@ -136,46 +135,46 @@ def analyze_csv_file(file_path):
         'Latitude': 'position_lat',
         'Longitude': 'position_long',
         'Power': 'power',
+        'Watts': 'power', # Matches your sample file
     }
-    df.rename(columns=lambda c: column_map.get(c, c.strip()), inplace=True)
-    
-    summary_data = {}
-    
+    df.rename(columns=lambda c: column_map.get(c.strip(), c.strip()), inplace=True)
+
     if 'heart_rate' not in df.columns:
         raise ValueError("CSV file must contain a 'Heart Rate' column.")
 
-    # --- CORRECTED TIMESTAMP HANDLING ---
+    # --- Timestamp Handling ---
     if 'timestamp' in df.columns:
-        # Convert column to datetime objects. pandas automatically handles the 'Z' for UTC.
-        timestamps = pd.to_datetime(df['timestamp'])
-
-        # Check if the parsed datetimes are "naive" (have no timezone info).
-        if timestamps.dt.tz is None:
-            # If naive, assume UTC and apply the timezone.
-            timestamps = timestamps.dt.tz_localize('UTC')
+        timestamps = pd.to_datetime(df['timestamp'], errors='coerce')
+        if not timestamps.dropna().empty:
+            if timestamps.dt.tz is None:
+                timestamps = timestamps.dt.tz_localize('UTC')
+            else:
+                timestamps = timestamps.dt.tz_convert('UTC')
+            
+            df['timestamp'] = timestamps.dt.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
+            
+            start_time = timestamps.dropna().iloc[0]
+            end_time = timestamps.dropna().iloc[-1]
+            summary_data = {'total_duration_secs': round((end_time - start_time).total_seconds(), 2)}
         else:
-            # If already timezone-aware, ensure they are converted to UTC.
-            timestamps = timestamps.dt.tz_convert('UTC')
+            summary_data = {}
+    else:
+        summary_data = {}
 
-        # Now, format to the ISO string standard for the database.
-        df['timestamp'] = timestamps.dt.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
-
-        # Calculate duration from the clean timestamps.
-        start_time = timestamps.iloc[0]
-        end_time = timestamps.iloc[-1]
-        summary_data['total_duration_secs'] = round((end_time - start_time).total_seconds(), 2)
-
-    # Calculate Summary Statistics
-    summary_data['avg_heart_rate'] = round(df['heart_rate'].mean())
-    summary_data['max_heart_rate'] = int(df['heart_rate'].max())
+    # --- Calculate Summary Statistics ---
+    if not df['heart_rate'].dropna().empty:
+        summary_data['avg_heart_rate'] = round(df['heart_rate'].mean())
+        summary_data['max_heart_rate'] = int(df['heart_rate'].max())
     
-    if 'distance' in df.columns:
-        # Use the last valid distance value in case of trailing empty rows.
-        last_valid_distance = df['distance'].dropna().iloc[-1]
-        summary_data['total_distance_km'] = round(last_valid_distance / 1000, 2)
+    if 'distance' in df.columns and not df['distance'].dropna().empty:
+        summary_data['total_distance_km'] = round(df['distance'].dropna().iloc[-1] / 1000, 2)
+
+    # --- KEY FIX: Replace numpy NaN with None for JSON compatibility ---
+    # This converts all numeric NaN values to a None type, which correctly
+    # becomes 'null' when serialized to JSON for the database.
+    df = df.replace({np.nan: None})
     
     # Convert DataFrame to a list of dictionaries for timeseries data
-    df.replace({pd.NA: None, pd.NaT: None}, inplace=True)
     time_series_data = df.to_dict('records')
 
     return summary_data, time_series_data
@@ -193,7 +192,6 @@ def analyze_fit_file(file_path):
     try:
         fitfile = fitparse.FitFile(file_path)
     except fitparse.FitParseError:
-        # Handle cases where the file is corrupt or not a valid .fit file
         return None, None
 
     time_series_data = []
