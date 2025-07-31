@@ -7,6 +7,22 @@ from datetime import timezone
 import os
 import numpy as np
 
+# --- NEW HELPER FUNCTION ---
+# This is a safe addition. It prevents server crashes if calculations result in
+# 'Not a Number' (NaN), which is not a valid JSON value.
+def clean_summary_data(summary_data):
+    """Converts any numpy NaN or Inf values in a dictionary to None."""
+    if not summary_data:
+        return {}
+    cleaned_data = {}
+    for key, value in summary_data.items():
+        # Check if the value is a float and is NaN or Infinity
+        if isinstance(value, (float, np.floating)) and (np.isnan(value) or np.isinf(value)):
+            cleaned_data[key] = None
+        else:
+            cleaned_data[key] = value
+    return cleaned_data
+
 # ==============================================================================
 # MAIN DISPATCHER FUNCTION
 # ==============================================================================
@@ -19,12 +35,16 @@ def analyze_session_file(file_path):
     _, extension = os.path.splitext(file_path)
     extension = extension.lower()
 
-    if extension == '.fit':
-        return analyze_fit_file(file_path)
-    elif extension == '.tcx':
-        return analyze_tcx_file(file_path)
-    elif extension == '.csv':
-        return analyze_csv_file(file_path)
+    parser = {
+        '.fit': analyze_fit_file,
+        '.tcx': analyze_tcx_file,
+        '.csv': analyze_csv_file,
+    }.get(extension)
+
+    if parser:
+        summary_data, time_series_data = parser(file_path)
+        # --- MODIFIED --- This safely cleans the data before it's saved.
+        return clean_summary_data(summary_data), time_series_data
     else:
         raise ValueError(f"Unsupported file type: {extension}")
 
@@ -76,6 +96,9 @@ def analyze_tcx_file(file_path):
             point['speed'] = float(speed_el.text) if speed_el is not None else None
             point['cadence'] = int(cad_el.text) * 2 if cad_el is not None else None
 
+        # --- MODIFIED --- This is the only change needed for the labeling feature.
+        point['Anomaly'] = 0
+
         if point.get('heart_rate') is not None:
             heart_rates.append(point['heart_rate'])
         
@@ -94,9 +117,9 @@ def analyze_tcx_file(file_path):
 
     if heart_rates:
         if 'avg_heart_rate' not in summary_data:
-            summary_data['avg_heart_rate'] = round(sum(heart_rates) / len(heart_rates))
+            summary_data['avg_heart_rate'] = round(sum(heart_rates) / len(heart_rates)) if heart_rates else 0
         if 'max_heart_rate' not in summary_data:
-            summary_data['max_heart_rate'] = max(heart_rates)
+            summary_data['max_heart_rate'] = max(heart_rates) if heart_rates else 0
 
     return summary_data, time_series_data
 
@@ -109,28 +132,22 @@ def analyze_csv_file(file_path):
     Parses complex CSV files by cleaning, transforming, and filling data.
     """
     try:
-        # Read file, skipping blank lines and handling potential whitespace after commas
         df = pd.read_csv(file_path, skip_blank_lines=True, skipinitialspace=True)
     except Exception as e:
         raise ValueError(f"Failed to read CSV file: {e}")
 
     df.columns = df.columns.str.strip()
     
-    # --- Step 1: Standardize Column Names ---
     column_map = {
-        'Timestamp': 'timestamp', 'Time': 'timestamp',
-        'Heart Rate': 'heart_rate', 'HeartRate': 'heart_rate', 'hr': 'heart_rate',
-        'Speed': 'speed', 'speed (m/s)': 'speed',
-        'Cadence': 'cadence', 'Run Cadence': 'cadence', 'RunCadence': 'cadence',
-        'Altitude': 'altitude', 'altitude (m)': 'altitude',
-        'Distance': 'distance', 'distance (m)': 'distance',
-        'Latitude': 'position_lat', 'Longitude': 'position_long',
-        'Power': 'power', 'Watts': 'power',
+        'Timestamp': 'timestamp', 'Time': 'timestamp', 'Heart Rate': 'heart_rate',
+        'HeartRate': 'heart_rate', 'hr': 'heart_rate', 'Speed': 'speed',
+        'speed (m/s)': 'speed', 'Cadence': 'cadence', 'Run Cadence': 'cadence',
+        'RunCadence': 'cadence', 'Altitude': 'altitude', 'altitude (m)': 'altitude',
+        'Distance': 'distance', 'distance (m)': 'distance', 'Latitude': 'position_lat',
+        'Longitude': 'position_long', 'Power': 'power', 'Watts': 'power',
     }
     df.rename(columns=lambda c: column_map.get(c, c), inplace=True)
     
-    # --- Step 2: Coerce Data to Numeric Types ---
-    # This is crucial. It converts all data to numbers, turning errors into NaN.
     numeric_cols = [
         'distance', 'enhanced_altitude', 'enhanced_speed', 'gps_accuracy',
         'position_lat', 'position_long', 'speed', 'heart_rate', 'power'
@@ -139,49 +156,42 @@ def analyze_csv_file(file_path):
         if col in df.columns:
             df[col] = pd.to_numeric(df[col], errors='coerce')
 
-    # --- Step 3: Fill Missing Data ---
-    # Now that data is numeric, we can reliably fill missing values.
     cols_to_ffill = ['distance', 'heart_rate', 'position_lat', 'position_long', 'gps_accuracy']
     for col in cols_to_ffill:
         if col in df.columns:
             df[col] = df[col].ffill()
 
-    # --- Step 4: Apply FIT-like Unit Conversions ---
     if 'position_lat' in df.columns:
         df['position_lat'] = df['position_lat'] * (180.0 / 2**31)
     if 'position_long' in df.columns:
         df['position_long'] = df['position_long'] * (180.0 / 2**31)
-
     if 'enhanced_altitude' in df.columns:
         df['altitude'] = (df['enhanced_altitude'] / 5.0) - 500.0
-    
     if 'enhanced_speed' in df.columns:
         df['speed'] = df['enhanced_speed']
 
-    # --- Step 5: Handle Timestamps ---
     if 'timestamp' in df.columns:
         timestamps = pd.to_datetime(df['timestamp'], errors='coerce')
         df.dropna(subset=['timestamp'], inplace=True)
-        
         if not timestamps.dropna().empty:
             if timestamps.dt.tz is None: timestamps = timestamps.dt.tz_localize('UTC')
             else: timestamps = timestamps.dt.tz_convert('UTC')
-            
             df['timestamp'] = timestamps.dt.strftime('%Y-%m-%dT%H:%M:%S.%f%z')
             start_time, end_time = timestamps.dropna().iloc[0], timestamps.dropna().iloc[-1]
             summary_data = {'total_duration_secs': round((end_time - start_time).total_seconds(), 2)}
         else: summary_data = {}
     else: raise ValueError("CSV file must contain a 'timestamp' or 'Time' column.")
 
-    # --- Step 6: Calculate Summary Statistics from Cleaned Data ---
     if 'heart_rate' in df.columns and not df['heart_rate'].dropna().empty:
-        summary_data['avg_heart_rate'] = round(df['heart_rate'].mean())
-        summary_data['max_heart_rate'] = int(df['heart_rate'].max())
+        summary_data['avg_heart_rate'] = df['heart_rate'].mean()
+        summary_data['max_heart_rate'] = df['heart_rate'].max()
     
     if 'distance' in df.columns and not df['distance'].dropna().empty:
-        summary_data['total_distance_km'] = round(df['distance'].dropna().iloc[-1] / 1000, 2)
+        summary_data['total_distance_km'] = df['distance'].dropna().iloc[-1] / 1000
 
-    # --- Step 7: Final Cleanup for JSON Output ---
+    # --- MODIFIED --- This is the only change needed for the labeling feature.
+    df['Anomaly'] = 0
+
     df = df.replace({np.nan: None})
     time_series_data = df.to_dict('records')
 
@@ -207,6 +217,9 @@ def analyze_fit_file(file_path):
 
     for record in fitfile.get_messages('record'):
         point = record.get_values()
+        
+        # --- MODIFIED --- This is the only change needed for the labeling feature.
+        point['Anomaly'] = 0
         
         if 'timestamp' in point and point['timestamp']:
             point['timestamp'] = point['timestamp'].replace(tzinfo=timezone.utc).isoformat()
@@ -243,14 +256,14 @@ def analyze_fit_file(file_path):
         summary_data.update(session_msg.get_values())
     
     if 'total_distance' in summary_data:
-        summary_data['total_distance_km'] = round(summary_data.get('total_distance', 0) / 1000, 2)
+        summary_data['total_distance_km'] = summary_data.get('total_distance', 0) / 1000
     if 'total_elapsed_time' in summary_data:
-        summary_data['total_duration_secs'] = round(summary_data.get('total_elapsed_time', 0), 2)
+        summary_data['total_duration_secs'] = summary_data.get('total_elapsed_time', 0)
 
     if heart_rates:
         if 'avg_heart_rate' not in summary_data:
-            summary_data['avg_heart_rate'] = round(sum(heart_rates) / len(heart_rates))
+            summary_data['avg_heart_rate'] = sum(heart_rates) / len(heart_rates) if heart_rates else 0
         if 'max_heart_rate' not in summary_data:
-            summary_data['max_heart_rate'] = max(heart_rates)
+            summary_data['max_heart_rate'] = max(heart_rates) if heart_rates else 0
 
     return summary_data, time_series_data

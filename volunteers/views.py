@@ -1,3 +1,5 @@
+# backend/volunteers/views.py
+
 import io
 import pandas as pd
 import numpy as np
@@ -8,6 +10,7 @@ from django.template.loader import render_to_string
 from django.utils.html import strip_tags
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
+from django.db import transaction
 
 from rest_framework import viewsets, permissions, status, generics
 from rest_framework.decorators import action
@@ -15,12 +18,19 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 from rest_framework.authtoken.views import ObtainAuthToken
 from rest_framework.authtoken.models import Token
-from rest_framework.parsers import MultiPartParser, FormParser
+# --- 1. IMPORT JSONParser ---
+from rest_framework.parsers import MultiPartParser, FormParser, JSONParser
 from rest_framework.filters import OrderingFilter
 
 from django_filters.rest_framework import DjangoFilterBackend
 from .models import Volunteer, RunningSession
-from .serializers import VolunteerSerializer, EmailCheckSerializer, RunningSessionSerializer, SessionLabelUpdateSerializer
+from .serializers import (
+    VolunteerSerializer,
+    EmailCheckSerializer,
+    RunningSessionSerializer,
+    SessionLabelUpdateSerializer,
+    RecordLabelUpdateSerializer
+)
 from .tasks import process_session_file
 from .pagination import CustomPageNumberPagination
 
@@ -66,24 +76,59 @@ class SessionLabelUpdateView(generics.UpdateAPIView):
 class RunningSessionViewSet(viewsets.ModelViewSet):
     serializer_class = RunningSessionSerializer
     permission_classes = [permissions.IsAdminUser]
-    parser_classes = [MultiPartParser, FormParser]
+    # --- 2. ADD JSONParser TO THE LIST OF PARSERS ---
+    parser_classes = [MultiPartParser, FormParser, JSONParser]
     pagination_class = CustomPageNumberPagination
     filter_backends = [DjangoFilterBackend, OrderingFilter]
     ordering_fields = [
-        'session_date', 
-        'total_distance_km', 
-        'total_duration_secs', 
-        'avg_heart_rate', 
-        'max_heart_rate', 
-        'min_heart_rate'
+        'session_date',
+        'total_distance_km',
+        'total_duration_secs',
+        'avg_heart_rate',
+        'max_heart_rate',
     ]
 
     def get_queryset(self):
-        queryset = RunningSession.objects.all()
+        queryset = RunningSession.objects.all().select_related('volunteer')
         volunteer_id = self.request.query_params.get('volunteer')
         if volunteer_id is not None:
             queryset = queryset.filter(volunteer_id=volunteer_id)
+        
+        if self.action == 'list':
+            queryset = queryset.defer('timeseries_data')
+            
         return queryset
+        
+    @action(detail=True, methods=['patch'], url_path='update-anomalies')
+    def update_anomalies(self, request, pk=None):
+        session = self.get_object()
+        updates = request.data.get('updates', [])
+
+        if not isinstance(updates, list) or not session.timeseries_data:
+            return Response(
+                {"error": "Invalid data format or no timeseries data in session."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+        try:
+            with transaction.atomic():
+                update_map = {item['timestamp']: item['anomaly'] for item in updates}
+                for record in session.timeseries_data:
+                    if record.get('timestamp') in update_map:
+                        record['anomaly'] = update_map[record['timestamp']]
+                session.save(update_fields=['timeseries_data'])
+            
+            return Response({"status": "success", "message": f"{len(updates)} records checked."}, status=status.HTTP_200_OK)
+        except Exception as e:
+            return Response({"error": str(e)}, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+
+    @action(detail=True, methods=['patch'], url_path='label-records', serializer_class=RecordLabelUpdateSerializer)
+    def label_records(self, request, pk=None):
+        session = self.get_object()
+        serializer = self.get_serializer(instance=session, data=request.data)
+        serializer.is_valid(raise_exception=True)
+        serializer.save()
+        return Response({'status': 'anomaly labels updated successfully'})
 
     def update(self, request, *args, **kwargs):
         instance = self.get_object()
@@ -97,7 +142,6 @@ class RunningSessionViewSet(viewsets.ModelViewSet):
             instance.total_duration_secs = None
             instance.avg_heart_rate = None
             instance.max_heart_rate = None
-            instance.min_heart_rate = None
             instance.save()
             process_session_file.delay(instance.id)
             serializer = self.get_serializer(instance)
