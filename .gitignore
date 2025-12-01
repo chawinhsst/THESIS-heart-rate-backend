@@ -1,9 +1,25 @@
 # Python / Django
 __pycache__/
 *.pyc
+*.pyo
 venv/
+env/
 .env
 db.sqlite3
 
+# Redis (Database Dump)
+dump.rdb
+
+# Media Files (User uploads)
+media/
+
+# Celery (Task Queue files - since you have Celery setup)
+celerybeat-schedule
+celerybeat.pid
+
 # Mac OS specific
 .DS_Store
+
+# IDEs (Optional - helpful if you use VS Code or PyCharm)
+.idea/
+.vscode/
